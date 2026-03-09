@@ -1,0 +1,2201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mr.Oliver's Games</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #111; color: white; }
+    button, input, select { font: inherit; }
+    .screen { display: none; min-height: 100vh; }
+    .screen.active { display: block; }
+    #homeScreen { padding: 24px; text-align: center; }
+    #homeScreen h1 { font-size: 48px; margin: 10px 0; }
+    #homeScreen p { color: #ccc; margin-bottom: 24px; }
+    #gamesList {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
+      max-width: 1200px;
+      margin: 0 auto 30px;
+    }
+    .game-card {
+      background: #1d1d1d;
+      color: white;
+      border: 2px solid #333;
+      padding: 18px;
+      border-radius: 14px;
+      cursor: pointer;
+      text-align: left;
+      min-height: 110px;
+    }
+    .game-card:hover { border-color: #6aa9ff; transform: translateY(-1px); }
+    .game-card h3 { margin: 0 0 8px; font-size: 22px; }
+    .tag { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #243142; color: #b7d9ff; font-size: 12px; }
+    #gameScreen { padding: 16px; background: #111; }
+    #topBar {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      flex-wrap: wrap; margin-bottom: 10px;
+    }
+    #backBtn {
+      padding: 10px 14px; border: none; border-radius: 10px; background: white; color: black; font-weight: bold; cursor: pointer;
+    }
+    #gameTitle { margin: 0; font-size: 32px; }
+    #gameInstructions { color: #ccc; margin: 0; }
+    #statusBar {
+      display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;
+      max-width: 1100px; margin: 0 auto 10px;
+    }
+    .status-pill {
+      background: #1f1f1f; border: 1px solid #333; color: #e7e7e7;
+      padding: 8px 12px; border-radius: 999px; font-size: 14px;
+    }
+    #canvasWrap {
+      max-width: 1100px; margin: 0 auto;
+      background: #0d0d0d; border: 2px solid #333; border-radius: 14px; padding: 12px;
+    }
+    #gameCanvas { width: 100%; max-width: 900px; background: #222; border: 2px solid #555; border-radius: 10px; display: block; margin: 0 auto; }
+    #gameUI {
+      max-width: 900px; margin: 12px auto 0; padding: 12px;
+      background: #171717; border: 1px solid #333; border-radius: 12px;
+      display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center;
+    }
+    .ui-section {
+      background: #222; border: 1px solid #3a3a3a; padding: 10px 12px; border-radius: 10px;
+      display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
+    .ui-title { font-weight: bold; margin-right: 8px; }
+    .ui-btn {
+      padding: 9px 12px; border: none; border-radius: 8px; background: #2e65ff; color: white; cursor: pointer;
+    }
+    .ui-btn.secondary { background: #444; }
+    .ui-btn.good { background: #25a55a; }
+    .ui-btn.bad { background: #b64040; }
+    .ui-btn.gold { background: #c78a14; }
+    .ui-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .big-note { color: #bbb; font-size: 14px; text-align: center; }
+    @media (max-width: 640px) {
+      #homeScreen h1 { font-size: 36px; }
+      #gameTitle { font-size: 26px; }
+      #gameCanvas { height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div id="homeScreen" class="screen active">
+    <h1>Mr.Oliver's Games</h1>
+    <p>30 playable mini-games in one file</p>
+    <div id="gamesList"></div>
+    <div class="big-note">Tip: on phones, some games work best in landscape.</div>
+  </div>
+
+  <div id="gameScreen" class="screen">
+    <div id="topBar">
+      <button id="backBtn">← Back to Mr.Oliver's Games</button>
+      <div style="flex:1; min-width:220px;">
+        <h2 id="gameTitle"></h2>
+        <p id="gameInstructions"></p>
+      </div>
+    </div>
+    <div id="statusBar"></div>
+    <div id="canvasWrap">
+      <canvas id="gameCanvas" width="900" height="560"></canvas>
+      <div id="gameUI"></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const homeScreen = document.getElementById('homeScreen');
+  const gameScreen = document.getElementById('gameScreen');
+  const gamesList = document.getElementById('gamesList');
+  const backBtn = document.getElementById('backBtn');
+  const gameTitle = document.getElementById('gameTitle');
+  const gameInstructions = document.getElementById('gameInstructions');
+  const statusBar = document.getElementById('statusBar');
+  const gameUI = document.getElementById('gameUI');
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const keys = {};
+  let mouse = { x: 0, y: 0, down: false };
+  let currentGame = null;
+  let currentGameId = null;
+  let lastTime = 0;
+
+  const helpers = {
+    rand(min, max) { return Math.random() * (max - min) + min; },
+    randi(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; },
+    clamp(v, min, max) { return Math.max(min, Math.min(max, v)); },
+    rects(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    },
+    dist(x1, y1, x2, y2) { return Math.hypot(x1 - x2, y1 - y2); },
+    circleRect(cx, cy, r, rect) {
+      const testX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+      const testY = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+      return ((cx - testX) ** 2 + (cy - testY) ** 2) <= r * r;
+    },
+    drawText(text, x, y, size = 24, color = 'white', align='left') {
+      ctx.fillStyle = color;
+      ctx.font = `${size}px Arial`;
+      ctx.textAlign = align;
+      ctx.fillText(text, x, y);
+      ctx.textAlign = 'left';
+    },
+    button(label, onClick, opts = {}) {
+      const b = document.createElement('button');
+      b.className = 'ui-btn' + (opts.kind ? ' ' + opts.kind : '');
+      b.textContent = label;
+      b.onclick = onClick;
+      if (opts.disabled) b.disabled = true;
+      return b;
+    },
+    section(title) {
+      const d = document.createElement('div');
+      d.className = 'ui-section';
+      if (title) {
+        const s = document.createElement('span');
+        s.className = 'ui-title';
+        s.textContent = title;
+        d.appendChild(s);
+      }
+      return d;
+    },
+    resetUI() {
+      gameUI.innerHTML = '';
+      statusBar.innerHTML = '';
+    },
+    status(text) {
+      const el = document.createElement('div');
+      el.className = 'status-pill';
+      el.textContent = text;
+      statusBar.appendChild(el);
+      return el;
+    },
+    centerMessage(title, subtitle='') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      helpers.drawText(title, canvas.width/2, canvas.height/2 - 10, 42, 'white', 'center');
+      if (subtitle) helpers.drawText(subtitle, canvas.width/2, canvas.height/2 + 30, 24, '#ddd', 'center');
+    },
+    clear(bg='#222') {
+      ctx.fillStyle = bg;
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+  };
+
+  function setGame(id, game) {
+    if (currentGame && currentGame.cleanup) currentGame.cleanup();
+    currentGame = game;
+    currentGameId = id;
+    helpers.resetUI();
+    gameTitle.textContent = game.name;
+    gameInstructions.textContent = game.instructions || '';
+    currentGame.init?.();
+    homeScreen.classList.remove('active');
+    gameScreen.classList.add('active');
+  }
+
+  function goHome() {
+    if (currentGame && currentGame.cleanup) currentGame.cleanup();
+    currentGame = null;
+    currentGameId = null;
+    homeScreen.classList.add('active');
+    gameScreen.classList.remove('active');
+    helpers.resetUI();
+  }
+
+  backBtn.onclick = goHome;
+
+  function canvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+  }
+
+  window.addEventListener('keydown', (e) => {
+    keys[e.key.toLowerCase()] = true;
+    if (currentGame?.keydown) currentGame.keydown(e);
+  });
+  window.addEventListener('keyup', (e) => {
+    keys[e.key.toLowerCase()] = false;
+    if (currentGame?.keyup) currentGame.keyup(e);
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    mouse = { ...mouse, ...canvasPos(e) };
+    currentGame?.mousemove?.(mouse.x, mouse.y, e);
+  });
+  canvas.addEventListener('mousedown', (e) => {
+    mouse = { ...mouse, ...canvasPos(e), down: true };
+    currentGame?.mousedown?.(mouse.x, mouse.y, e);
+    currentGame?.click?.(mouse.x, mouse.y, e);
+  });
+  canvas.addEventListener('mouseup', (e) => {
+    mouse = { ...mouse, ...canvasPos(e), down: false };
+    currentGame?.mouseup?.(mouse.x, mouse.y, e);
+  });
+
+  function loop(ts) {
+    const dt = Math.min(0.033, (ts - lastTime) / 1000 || 0.016);
+    lastTime = ts;
+    if (currentGame) {
+      currentGame.update?.(dt);
+      currentGame.draw?.();
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // -------- Games --------
+  function createSnake() {
+    const box = 20;
+    let snake, dir, nextDir, food, score, over, forever, timer;
+    const W = 30, H = 24;
+    function newFood() {
+      while (true) {
+        const f = { x: helpers.randi(0, W-1), y: helpers.randi(0, H-1) };
+        if (!snake.some(s => s.x === f.x && s.y === f.y)) return f;
+      }
+    }
+    return {
+      name: 'Snake',
+      instructions: 'Arrow keys to move. R restarts. Forever mode wraps around edges.',
+      init() {
+        snake = [{x:10,y:10}];
+        dir = 'right'; nextDir = 'right'; food = {x:15,y:8}; score = 0; over = false; forever = false; timer = 0;
+        const sec = helpers.section('Mode');
+        sec.appendChild(helpers.button('Normal', () => { forever = false; this.init(); }, {kind:'secondary'}));
+        sec.appendChild(helpers.button('Forever', () => { forever = true; this.init(); forever = true; }));
+        gameUI.appendChild(sec);
+      },
+      keydown(e) {
+        const k = e.key.toLowerCase();
+        if (k === 'arrowup' && dir !== 'down') nextDir = 'up';
+        if (k === 'arrowdown' && dir !== 'up') nextDir = 'down';
+        if (k === 'arrowleft' && dir !== 'right') nextDir = 'left';
+        if (k === 'arrowright' && dir !== 'left') nextDir = 'right';
+        if (k === 'r' && over) this.init();
+      },
+      update(dt) {
+        timer += dt;
+        if (timer < 0.16 || over) return;
+        timer = 0;
+        dir = nextDir;
+        let head = {...snake[0]};
+        if (dir === 'up') head.y--;
+        if (dir === 'down') head.y++;
+        if (dir === 'left') head.x--;
+        if (dir === 'right') head.x++;
+        if (forever) {
+          if (head.x < 0) head.x = W-1;
+          if (head.x >= W) head.x = 0;
+          if (head.y < 0) head.y = H-1;
+          if (head.y >= H) head.y = 0;
+        }
+        if (!forever && (head.x < 0 || head.y < 0 || head.x >= W || head.y >= H)) { over = true; return; }
+        if (snake.some(s => s.x === head.x && s.y === head.y)) {
+          if (forever) snake.pop(); else { over = true; return; }
+        }
+        snake.unshift(head);
+        if (head.x === food.x && head.y === food.y) {
+          score++;
+          food = newFood();
+        } else snake.pop();
+      },
+      draw() {
+        helpers.clear('#182018');
+        for (let x=0;x<W;x++) for (let y=0;y<H;y++) {
+          ctx.strokeStyle = '#274027';
+          ctx.strokeRect(120+x*box, 40+y*box, box, box);
+        }
+        ctx.fillStyle = 'red';
+        ctx.fillRect(120 + food.x*box, 40 + food.y*box, box, box);
+        snake.forEach((s,i) => {
+          ctx.fillStyle = i ? '#2fc14f' : '#7dff7d';
+          ctx.fillRect(120 + s.x*box, 40 + s.y*box, box, box);
+        });
+        helpers.drawText(`Score: ${score}`, 20, 36, 24);
+        helpers.drawText(`Mode: ${forever ? 'Forever' : 'Normal'}`, 20, 66, 22);
+        if (over) helpers.centerMessage('Game Over', 'Press R to restart');
+      }
+    };
+  }
+
+  function createFlappy() {
+    let bird, pipes, timer, score, over;
+    return {
+      name: 'Flappy Bird',
+      instructions: 'Press space or click to flap through the pipes.',
+      init() {
+        bird = {x:170,y:220,vy:0,r:18};
+        pipes = [];
+        timer = 0; score = 0; over = false;
+        gameUI.appendChild(helpers.section()).appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+      },
+      flap() { if (!over) bird.vy = -320; },
+      keydown(e) { if (e.key === ' ') { e.preventDefault(); this.flap(); } if (e.key.toLowerCase()==='r' && over) this.init(); },
+      click() { this.flap(); },
+      update(dt) {
+        if (over) return;
+        timer += dt;
+        bird.vy += 700*dt;
+        bird.y += bird.vy*dt;
+        if (timer > 1.5) {
+          timer = 0;
+          const gap = 150;
+          const top = helpers.randi(80, 320);
+          pipes.push({x:900,w:70,top, gap, passed:false});
+        }
+        pipes.forEach(p=>p.x -= 220*dt);
+        pipes = pipes.filter(p=>p.x+p.w>-20);
+        if (bird.y < 0 || bird.y > 560) over = true;
+        for (const p of pipes) {
+          if (!p.passed && p.x + p.w < bird.x) { p.passed = true; score++; }
+          const topRect = {x:p.x,y:0,w:p.w,h:p.top-gap/2};
+          const botRect = {x:p.x,y:p.top+gap/2,w:p.w,h:560-(p.top+gap/2)};
+          if (helpers.circleRect(bird.x, bird.y, bird.r, topRect) || helpers.circleRect(bird.x,bird.y,bird.r,botRect)) over = true;
+        }
+      },
+      draw() {
+        helpers.clear('#73c8ff');
+        ctx.fillStyle='#6bc24a'; ctx.fillRect(0,500,900,60);
+        for (const p of pipes) {
+          ctx.fillStyle = '#2faa2f';
+          ctx.fillRect(p.x,0,p.w,p.top-p.gap/2);
+          ctx.fillRect(p.x,p.top+p.gap/2,p.w,560-(p.top+p.gap/2));
+        }
+        ctx.fillStyle = '#ffd44d';
+        ctx.beginPath(); ctx.arc(bird.x,bird.y,bird.r,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='black'; ctx.beginPath(); ctx.arc(bird.x+6,bird.y-4,3,0,Math.PI*2); ctx.fill();
+        helpers.drawText(`Score: ${score}`, 20, 32, 28);
+        if (over) helpers.centerMessage('Crashed!', 'Press R or Restart');
+      }
+    };
+  }
+
+  function createShooter() {
+    let ship, bullets, enemies, stars, cooldown, spawn, score, lives, over;
+    return {
+      name:'Space Shooter',
+      instructions:'Move with arrow keys or A/D. Space shoots. Destroy enemies and survive.',
+      init() {
+        ship = {x:430,y:500,w:40,h:28};
+        bullets=[]; enemies=[]; stars=Array.from({length:70},()=>({x:helpers.rand(0,900),y:helpers.rand(0,560),s:helpers.rand(1,3)}));
+        cooldown=0; spawn=0; score=0; lives=3; over=false;
+        gameUI.appendChild(helpers.section()).appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+      },
+      keydown(e){ if(e.key===' '&&!over) this.fire(); if(e.key.toLowerCase()==='r'&&over)this.init(); },
+      fire(){ if(cooldown<=0){ bullets.push({x:ship.x+ship.w/2-3,y:ship.y,w:6,h:14}); cooldown=0.25; } },
+      update(dt){
+        stars.forEach(s=>{s.y+=30*s.s*dt;if(s.y>560){s.y=0;s.x=helpers.rand(0,900);}});
+        if(over) return;
+        if(keys['arrowleft']||keys['a']) ship.x-=340*dt;
+        if(keys['arrowright']||keys['d']) ship.x+=340*dt;
+        ship.x=helpers.clamp(ship.x,0,900-ship.w);
+        cooldown-=dt;
+        spawn+=dt;
+        if(spawn>0.7){spawn=0; enemies.push({x:helpers.rand(20,840),y:-30,w:32,h:26,hp:1,vy:helpers.rand(110,190)});}
+        bullets.forEach(b=>b.y-=500*dt);
+        enemies.forEach(en=>en.y+=en.vy*dt);
+        bullets=bullets.filter(b=>b.y>-30);
+        enemies=enemies.filter(en=>en.y<620&&en.hp>0);
+        for(const b of bullets){
+          for(const en of enemies){
+            if(helpers.rects(b,en)&&en.hp>0){en.hp--;b.y=-100;score+=10;}
+          }
+        }
+        for(const en of enemies){
+          if(helpers.rects(ship,en)&&en.hp>0){en.hp=0;lives--; if(lives<=0) over=true;}
+          if(en.y>560 && en.hp>0){en.hp=0;lives--; if(lives<=0) over=true;}
+        }
+      },
+      draw(){
+        helpers.clear('black');
+        ctx.fillStyle='white'; stars.forEach(s=>ctx.fillRect(s.x,s.y,s.s,s.s));
+        ctx.fillStyle='#2e8cff'; ctx.fillRect(ship.x,ship.y,ship.w,ship.h);
+        ctx.fillStyle='#88c4ff'; ctx.fillRect(ship.x+12,ship.y-10,16,10);
+        ctx.fillStyle='yellow'; bullets.forEach(b=>ctx.fillRect(b.x,b.y,b.w,b.h));
+        ctx.fillStyle='crimson'; enemies.forEach(en=>ctx.fillRect(en.x,en.y,en.w,en.h));
+        helpers.drawText(`Score: ${score}`,20,32,28);
+        helpers.drawText(`Lives: ${lives}`,20,62,24);
+        if(over) helpers.centerMessage('Game Over','Press R or Restart');
+      }
+    };
+  }
+
+  function createCookie() {
+    let cookies, perClick, upgradeBought;
+    return {
+      name:'Cookie Clicker',
+      instructions:'Click the cookie. Buy the upgrade at 10 cookies.',
+      init(){
+        cookies=0; perClick=1; upgradeBought=false;
+        const sec=helpers.section('Shop');
+        const buyBtn=helpers.button('Double Click Power (10)',()=>{
+          if(cookies>=10&&!upgradeBought){cookies-=10;perClick=2;upgradeBought=true;buyBtn.disabled=true;buyBtn.textContent='Upgrade Purchased!';}
+        },{kind:'good',disabled:true});
+        this._buyBtn=buyBtn;
+        sec.appendChild(buyBtn);
+        gameUI.appendChild(sec);
+      },
+      click(x,y){
+        const cx=450, cy=260, r=95;
+        if(helpers.dist(x,y,cx,cy)<=r){
+          cookies += perClick;
+          if(cookies>=10 && !upgradeBought) this._buyBtn.disabled=false;
+        }
+      },
+      draw(){
+        helpers.clear('#fff3cd');
+        helpers.drawText(`Cookies: ${cookies}`, 40, 50, 30, 'black');
+        ctx.fillStyle='#d2691e';
+        ctx.beginPath(); ctx.arc(450,260,95,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#8b4513';
+        [[-35,-30],[30,-25],[-15,10],[35,18],[-40,35]].forEach(([dx,dy])=>{
+          ctx.beginPath(); ctx.arc(450+dx,260+dy,10,0,Math.PI*2); ctx.fill();
+        });
+        helpers.drawText(`Click Power: ${perClick}`, 40, 88, 24, 'black');
+      }
+    };
+  }
+
+  function createDoger() {
+    let level, score, coins, currentSkin, ownedSkins, obstacles, gameOver, levelComplete, frameCount, mouseActive;
+    const levelGoal = 100;
+    const skinList = [
+      { name: "white", color: "white", cost: 0, text: "black" },
+      { name: "red", color: "red", cost: 100, text: "white" },
+      { name: "orange", color: "orange", cost: 200, text: "black" },
+      { name: "yellow", color: "yellow", cost: 300, text: "black" },
+      { name: "green", color: "green", cost: 400, text: "white" },
+      { name: "blue", color: "blue", cost: 500, text: "white" },
+      { name: "purple", color: "purple", cost: 600, text: "white" }
+    ];
+    const player = { x: 430, y: 500, w: 60, h: 20, speed: 420 };
+
+    const save = () => localStorage.setItem('doger1SaveArcade', JSON.stringify({level, coins, currentSkin, ownedSkins}));
+    const load = () => {
+      const raw = localStorage.getItem('doger1SaveArcade');
+      if (!raw) return;
+      try {
+        const data = JSON.parse(raw);
+        level = data.level ?? 1;
+        coins = data.coins ?? 0;
+        currentSkin = data.currentSkin ?? 'white';
+        ownedSkins = data.ownedSkins ?? {white:true};
+        ownedSkins.white = true;
+      } catch {}
+    };
+
+    function renderShop() {
+      gameUI.innerHTML = '';
+      const info = helpers.section('Shop');
+      skinList.forEach(skin => {
+        const b = helpers.button(
+          ownedSkins[skin.name]
+            ? (currentSkin===skin.name ? `${skin.name} [using]` : `${skin.name} (owned)`)
+            : `${skin.name} (${skin.cost})`,
+          () => {
+            if (ownedSkins[skin.name]) {
+              currentSkin = skin.name;
+            } else if (coins >= skin.cost) {
+              coins -= skin.cost;
+              ownedSkins[skin.name] = true;
+              currentSkin = skin.name;
+            }
+            save();
+            renderShop();
+          },
+          {kind:'secondary'}
+        );
+        b.style.background = skin.color;
+        b.style.color = skin.text;
+        info.appendChild(b);
+      });
+      const actions = helpers.section('Actions');
+      actions.appendChild(helpers.button('Retry', ()=>restartLoss(), {kind:'secondary'}));
+      actions.appendChild(helpers.button('Next Level', ()=>nextLevel(), {kind:'good'}));
+      gameUI.appendChild(info);
+      gameUI.appendChild(actions);
+    }
+
+    function restartLoss() {
+      obstacles = [];
+      score = 0;
+      frameCount = 0;
+      gameOver = false;
+      levelComplete = false;
+      player.x = 430;
+    }
+
+    function nextLevel() {
+      if (!levelComplete) return;
+      level++;
+      obstacles = [];
+      score = 0;
+      frameCount = 0;
+      gameOver = false;
+      levelComplete = false;
+      player.x = 430;
+      save();
+      renderShop();
+    }
+
+    return {
+      name:'Block Dodger',
+      instructions:'Move left/right or use your mouse. R retries. N goes to next level.',
+      init() {
+        level = 1; score = 0; coins = 0; currentSkin = 'white'; ownedSkins = {white:true};
+        obstacles = []; gameOver = false; levelComplete = false; frameCount = 0; mouseActive = false;
+        load();
+        restartLoss();
+        renderShop();
+      },
+      keydown(e) {
+        const k = e.key.toLowerCase();
+        if (k==='r' && gameOver) restartLoss();
+        if (k==='n' && levelComplete) nextLevel();
+      },
+      mousemove(x) {
+        mouse.x = x;
+        mouseActive = true;
+      },
+      update(dt) {
+        if (gameOver || levelComplete) return;
+        frameCount++;
+        if (keys['arrowleft'] || keys['a']) player.x -= player.speed * dt;
+        if (keys['arrowright'] || keys['d']) player.x += player.speed * dt;
+        if (mouseActive) {
+          const target = mouse.x - player.w / 2;
+          const diff = target - player.x;
+          const step = Math.sign(diff) * Math.min(Math.abs(diff), player.speed * dt);
+          player.x += step;
+        }
+        player.x = helpers.clamp(player.x, 0, canvas.width - player.w);
+
+        const spawnRate = Math.max(14, 34 - level * 2);
+        if (frameCount % spawnRate === 0) {
+          const w = helpers.rand(24, 90);
+          obstacles.push({
+            x: helpers.rand(0, canvas.width - w),
+            y: -25,
+            w, h: 20,
+            vy: helpers.rand(160, 290) + level * 18
+          });
+        }
+
+        for (let i=obstacles.length-1;i>=0;i--) {
+          const o = obstacles[i];
+          o.y += o.vy * dt;
+          if (helpers.rects(player, o)) {
+            gameOver = true;
+            coins += score;
+            save();
+            renderShop();
+            return;
+          }
+          if (o.y > canvas.height) {
+            obstacles.splice(i,1);
+            score++;
+            if (score >= levelGoal) {
+              levelComplete = true;
+              coins += 200;
+              save();
+              renderShop();
+              return;
+            }
+          }
+        }
+      },
+      draw() {
+        helpers.clear('#222');
+        ctx.fillStyle = 'white';
+        ctx.font = '24px Arial';
+        ctx.fillText(`Level: ${level}`, 20, 30);
+        ctx.fillText(`Score: ${score} / ${levelGoal}`, 20, 60);
+        ctx.fillText(`Coins: ${coins}`, 20, 90);
+        ctx.fillText(`Skin: ${currentSkin}`, 20, 120);
+
+        ctx.fillStyle = currentSkin;
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+
+        ctx.fillStyle = 'tomato';
+        obstacles.forEach(o => ctx.fillRect(o.x, o.y, o.w, o.h));
+
+        if (gameOver) helpers.centerMessage('Game Over', 'Press R to retry');
+        if (levelComplete) helpers.centerMessage('Level Complete!', 'Press N for next level');
+      }
+    };
+  }
+
+  function createFrogger() {
+    let frog, cars, logs, goalRow, lives, won;
+    return {
+      name:'Frogger',
+      instructions:'Use arrow keys to cross the road and river.',
+      init(){
+        frog={x:430,y:510,w:26,h:26}; lives=3; won=false; goalRow=30;
+        cars=[]; logs=[];
+        for(let row=0;row<4;row++){
+          for(let i=0;i<4;i++) cars.push({x:i*230 + row*60,y:380-row*55,w:70,h:30,v:(row%2?1:-1)*(120+row*25)});
+        }
+        for(let row=0;row<3;row++){
+          for(let i=0;i<3;i++) logs.push({x:i*280 + row*90,y:110+row*55,w:120,h:28,v:(row%2?-1:1)*(90+row*20)});
+        }
+      },
+      keydown(e){
+        if(e.key==='ArrowUp') frog.y-=35;
+        if(e.key==='ArrowDown') frog.y+=35;
+        if(e.key==='ArrowLeft') frog.x-=35;
+        if(e.key==='ArrowRight') frog.x+=35;
+        frog.x=helpers.clamp(frog.x,0,canvas.width-frog.w);
+        frog.y=helpers.clamp(frog.y,0,canvas.height-frog.h);
+      },
+      update(dt){
+        if(won||lives<=0) return;
+        cars.forEach(c=>{c.x+=c.v*dt;if(c.v>0&&c.x>canvas.width+30)c.x=-c.w-20;if(c.v<0&&c.x<-c.w-30)c.x=canvas.width+20;});
+        logs.forEach(l=>{l.x+=l.v*dt;if(l.v>0&&l.x>canvas.width+30)l.x=-l.w-20;if(l.v<0&&l.x<-l.w-30)l.x=canvas.width+20;});
+        for(const c of cars){ if(helpers.rects(frog,c)){ lives--; frog.x=430; frog.y=510; break; } }
+        if(frog.y < 290 && frog.y > 80){
+          let onLog=false;
+          for(const l of logs){
+            if(helpers.rects(frog,l)){ frog.x += l.v*dt; onLog=true; }
+          }
+          if(!onLog){ lives--; frog.x=430; frog.y=510; }
+        }
+        if(frog.y <= goalRow) won=true;
+      },
+      draw(){
+        helpers.clear('#2b7a2b');
+        ctx.fillStyle='#2449a8'; ctx.fillRect(0,80,900,190);
+        ctx.fillStyle='#555'; ctx.fillRect(0,330,900,220);
+        ctx.fillStyle='yellow'; ctx.fillRect(0,270,900,20);
+        ctx.fillStyle='tan'; logs.forEach(l=>ctx.fillRect(l.x,l.y,l.w,l.h));
+        ctx.fillStyle='red'; cars.forEach(c=>ctx.fillRect(c.x,c.y,c.w,c.h));
+        ctx.fillStyle='lime'; ctx.fillRect(frog.x,frog.y,frog.w,frog.h);
+        helpers.drawText(`Lives: ${lives}`,20,30,28);
+        if(won) helpers.centerMessage('You Win!');
+        if(lives<=0) helpers.centerMessage('Out of Lives');
+      }
+    };
+  }
+
+  function createBreakout() {
+    let paddle, ball, bricks, score, lives, over, won;
+    return {
+      name:'Breakout',
+      instructions:'Move the paddle with mouse or arrows and break all bricks.',
+      init(){
+        paddle={x:380,y:520,w:140,h:16};
+        ball={x:450,y:420,r:10,vx:220,vy:-220};
+        bricks=[]; score=0; lives=3; over=false; won=false;
+        for(let r=0;r<5;r++) for(let c=0;c<10;c++) bricks.push({x:55+c*79,y:55+r*30,w:70,h:20,alive:true,color:`hsl(${r*55+20} 80% 55%)`});
+      },
+      mousemove(x){ paddle.x = helpers.clamp(x-paddle.w/2,0,canvas.width-paddle.w); },
+      update(dt){
+        if(over||won) return;
+        if(keys['arrowleft']||keys['a']) paddle.x -= 420*dt;
+        if(keys['arrowright']||keys['d']) paddle.x += 420*dt;
+        paddle.x=helpers.clamp(paddle.x,0,canvas.width-paddle.w);
+        ball.x += ball.vx*dt; ball.y += ball.vy*dt;
+        if(ball.x<ball.r||ball.x>canvas.width-ball.r) ball.vx*=-1;
+        if(ball.y<ball.r) ball.vy*=-1;
+        if(ball.y>canvas.height+20){
+          lives--;
+          if(lives<=0){over=true;} else {ball.x=450;ball.y=420;ball.vx=220*(Math.random()<0.5?-1:1);ball.vy=-220;}
+        }
+        if(helpers.circleRect(ball.x,ball.y,ball.r,paddle)&&ball.vy>0){
+          ball.vy = -Math.abs(ball.vy);
+          ball.vx = (ball.x-(paddle.x+paddle.w/2))*4;
+        }
+        for(const b of bricks){
+          if(b.alive && helpers.circleRect(ball.x,ball.y,ball.r,b)){
+            b.alive=false; ball.vy*=-1; score+=10; break;
+          }
+        }
+        if(bricks.every(b=>!b.alive)) won=true;
+      },
+      draw(){
+        helpers.clear('#111b2d');
+        bricks.forEach(b=>{ if(b.alive){ctx.fillStyle=b.color;ctx.fillRect(b.x,b.y,b.w,b.h);} });
+        ctx.fillStyle='white'; ctx.fillRect(paddle.x,paddle.y,paddle.w,paddle.h);
+        ctx.fillStyle='orange'; ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+        helpers.drawText(`Score: ${score}`,20,30,26);
+        helpers.drawText(`Lives: ${lives}`,20,58,22);
+        if(over) helpers.centerMessage('Game Over');
+        if(won) helpers.centerMessage('You Broke Them All!');
+      }
+    };
+  }
+
+  function createPong() {
+    let left,right,ball,lscore,rscore,ai;
+    return {
+      name:'Pong',
+      instructions:'W/S moves left paddle. Arrow keys move right paddle. Play against a friend or the AI.',
+      init(){
+        left={x:25,y:220,w:14,h:110}; right={x:861,y:220,w:14,h:110};
+        ball={x:450,y:280,r:10,vx:260*(Math.random()<0.5?-1:1),vy:helpers.rand(-160,160)};
+        lscore=0;rscore=0;ai=true;
+        const sec=helpers.section('Mode');
+        sec.appendChild(helpers.button('Toggle AI',()=>{ai=!ai;}, {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt){
+        if(keys['w']) left.y-=340*dt;
+        if(keys['s']) left.y+=340*dt;
+        if(!ai){
+          if(keys['arrowup']) right.y-=340*dt;
+          if(keys['arrowdown']) right.y+=340*dt;
+        } else {
+          right.y += Math.sign((ball.y-right.y-right.h/2))*260*dt;
+        }
+        left.y=helpers.clamp(left.y,0,560-left.h);
+        right.y=helpers.clamp(right.y,0,560-right.h);
+        ball.x+=ball.vx*dt; ball.y+=ball.vy*dt;
+        if(ball.y<ball.r||ball.y>560-ball.r) ball.vy*=-1;
+        [left,right].forEach(p=>{
+          if(helpers.circleRect(ball.x,ball.y,ball.r,p)){
+            ball.vx *= -1;
+            ball.vy += (ball.y-(p.y+p.h/2))*2.2;
+          }
+        });
+        if(ball.x<0){rscore++; ball={x:450,y:280,r:10,vx:260,vy:helpers.rand(-160,160)};}
+        if(ball.x>900){lscore++; ball={x:450,y:280,r:10,vx:-260,vy:helpers.rand(-160,160)};}
+      },
+      draw(){
+        helpers.clear('black');
+        ctx.strokeStyle='#666'; ctx.setLineDash([8,8]); ctx.beginPath(); ctx.moveTo(450,0); ctx.lineTo(450,560); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle='white'; ctx.fillRect(left.x,left.y,left.w,left.h); ctx.fillRect(right.x,right.y,right.w,right.h);
+        ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
+        helpers.drawText(`${lscore}`,380,50,42);
+        helpers.drawText(`${rscore}`,500,50,42);
+        helpers.drawText(ai?'AI ON':'2 Players',20,30,20);
+      }
+    };
+  }
+  function createSimon() {
+    let sequence, player, flashIndex, flashTimer, accepting, colors, pads, round, over;
+    function nextRound() {
+      sequence.push(helpers.randi(0,3));
+      player = [];
+      flashIndex = 0;
+      flashTimer = 0.5;
+      accepting = false;
+      round = sequence.length;
+    }
+    return {
+      name:'Simon Memory Game',
+      instructions:'Watch the pattern, then click the colors in the same order.',
+      init() {
+        colors = ['#ff4d4d','#4da6ff','#ffd24d','#4dff88'];
+        pads = [
+          {x:250,y:110,w:170,h:170,c:0},
+          {x:480,y:110,w:170,h:170,c:1},
+          {x:250,y:310,w:170,h:170,c:2},
+          {x:480,y:310,w:170,h:170,c:3}
+        ];
+        sequence = [];
+        player = [];
+        flashIndex = 0;
+        flashTimer = 0;
+        accepting = false;
+        over = false;
+        round = 0;
+        nextRound();
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      click(x,y) {
+        if (!accepting || over) return;
+        const pad = pads.find(p => x>=p.x && x<=p.x+p.w && y>=p.y && y<=p.y+p.h);
+        if (!pad) return;
+        player.push(pad.c);
+        const idx = player.length - 1;
+        if (player[idx] !== sequence[idx]) {
+          over = true;
+          accepting = false;
+          return;
+        }
+        if (player.length === sequence.length) {
+          setTimeout(() => nextRound(), 500);
+        }
+      },
+      update(dt) {
+        if (accepting || over) return;
+        flashTimer -= dt;
+        if (flashTimer <= 0) {
+          flashIndex++;
+          if (flashIndex > sequence.length * 2) {
+            accepting = true;
+          } else {
+            flashTimer = 0.45;
+          }
+        }
+      },
+      draw() {
+        helpers.clear('#111');
+        const active = !accepting && flashIndex > 0 && flashIndex <= sequence.length*2 && flashIndex % 2 === 1
+          ? sequence[(flashIndex-1)/2]
+          : -1;
+        pads.forEach((p,i)=>{
+          ctx.fillStyle = i===active ? colors[i] : colors[i] + 'aa';
+          ctx.fillRect(p.x,p.y,p.w,p.h);
+        });
+        helpers.drawText(`Round: ${round}`, 20, 32, 28);
+        helpers.drawText(accepting ? 'Your turn' : 'Watch the pattern', 20, 62, 22);
+        if (over) helpers.centerMessage('Wrong Pattern', 'Restart to try again');
+      }
+    };
+  }
+
+  function createReaction() {
+    let state, timer, startTime, reaction, best;
+    return {
+      name:'Reaction Speed Test',
+      instructions:'Wait for green, then click as fast as you can.',
+      init() {
+        state = 'waiting';
+        timer = helpers.rand(1.5, 4.0);
+        startTime = 0;
+        reaction = null;
+        best = Number(localStorage.getItem('reactionBest') || 9999);
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      click() {
+        if (state === 'ready') {
+          reaction = Math.round((performance.now() - startTime));
+          best = Math.min(best, reaction);
+          localStorage.setItem('reactionBest', String(best));
+          state = 'done';
+        } else if (state === 'waiting') {
+          state = 'early';
+        }
+      },
+      update(dt) {
+        if (state === 'waiting') {
+          timer -= dt;
+          if (timer <= 0) {
+            state = 'ready';
+            startTime = performance.now();
+          }
+        }
+      },
+      draw() {
+        let bg = '#555';
+        if (state === 'ready') bg = '#1ea34a';
+        if (state === 'early') bg = '#b64040';
+        if (state === 'done') bg = '#2e65ff';
+        helpers.clear(bg);
+        if (state === 'waiting') helpers.drawText('Wait for green...', 450, 280, 40, 'white', 'center');
+        if (state === 'ready') helpers.drawText('CLICK!', 450, 280, 54, 'white', 'center');
+        if (state === 'early') helpers.drawText('Too Early!', 450, 260, 46, 'white', 'center');
+        if (state === 'done') helpers.drawText(`${reaction} ms`, 450, 250, 54, 'white', 'center');
+        if (state === 'done') helpers.drawText(`Best: ${best} ms`, 450, 300, 30, 'white', 'center');
+      }
+    };
+  }
+
+  function createAngry() {
+    let birds, pigs, dragging, score, levelWon;
+    function reset() {
+      birds = [
+        {x:120,y:420,r:18,launched:false,vx:0,vy:0,used:false},
+        {x:80,y:450,r:18,launched:false,vx:0,vy:0,used:false},
+        {x:40,y:480,r:18,launched:false,vx:0,vy:0,used:false}
+      ];
+      pigs = [
+        {x:700,y:470,r:22,alive:true},
+        {x:760,y:420,r:22,alive:true},
+        {x:820,y:470,r:22,alive:true}
+      ];
+      dragging = null;
+      score = 0;
+      levelWon = false;
+    }
+    function currentBird() { return birds.find(b=>!b.used); }
+    return {
+      name:'Angry Birds Launcher',
+      instructions:'Drag the bird back and release to launch it into the pigs.',
+      init() {
+        reset();
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>reset(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      mousedown(x,y) {
+        const b = currentBird();
+        if (!b || b.launched) return;
+        if (helpers.dist(x,y,b.x,b.y) <= b.r+6) dragging = b;
+      },
+      mousemove(x,y) {
+        if (!dragging) return;
+        dragging.x = helpers.clamp(x, 40, 180);
+        dragging.y = helpers.clamp(y, 360, 500);
+      },
+      mouseup() {
+        if (!dragging) return;
+        const dx = 120 - dragging.x;
+        const dy = 420 - dragging.y;
+        dragging.vx = dx * 3.2;
+        dragging.vy = dy * 3.2;
+        dragging.launched = true;
+        dragging = null;
+      },
+      update(dt) {
+        birds.forEach(b=>{
+          if (b.launched && !b.used) {
+            b.vy += 480 * dt;
+            b.x += b.vx * dt;
+            b.y += b.vy * dt;
+            if (b.y > 520 || b.x > 940 || b.x < -40) b.used = true;
+            pigs.forEach(p=>{
+              if (p.alive && helpers.dist(b.x,b.y,p.x,p.y) < b.r + p.r) {
+                p.alive = false;
+                b.vx *= 0.5;
+                b.vy *= -0.3;
+                score += 100;
+              }
+            });
+          }
+        });
+        if (pigs.every(p=>!p.alive)) levelWon = true;
+      },
+      draw() {
+        helpers.clear('#87ceeb');
+        ctx.fillStyle='#77bb55'; ctx.fillRect(0,520,900,40);
+        ctx.fillStyle='#8b5a2b';
+        ctx.fillRect(680,450,150,16);
+        ctx.fillRect(710,390,16,60);
+        ctx.fillRect(780,390,16,60);
+        pigs.forEach(p=>{
+          if (!p.alive) return;
+          ctx.fillStyle='limegreen';
+          ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+        });
+        ctx.strokeStyle='#5c3317'; ctx.lineWidth=6;
+        ctx.beginPath(); ctx.moveTo(100,450); ctx.lineTo(120,390); ctx.lineTo(140,450); ctx.stroke();
+        birds.forEach(b=>{
+          if (b.used) return;
+          ctx.fillStyle='crimson';
+          ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
+        });
+        helpers.drawText(`Score: ${score}`, 20, 30, 28);
+        if (levelWon) helpers.centerMessage('All Pigs Down!');
+      }
+    };
+  }
+
+  function createBasketball() {
+    let ball, dragging, score, shots;
+    function resetBall() {
+      ball = {x:130,y:470,r:16,vx:0,vy:0,moving:false};
+      dragging = false;
+    }
+    return {
+      name:'Basketball Shot Game',
+      instructions:'Drag from the ball and release to shoot into the hoop.',
+      init() {
+        score = 0; shots = 10;
+        resetBall();
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      mousedown(x,y) {
+        if (!ball.moving && shots > 0 && helpers.dist(x,y,ball.x,ball.y) < ball.r+8) dragging = true;
+      },
+      mousemove(x,y) {
+        if (dragging) {
+          ball.previewX = x;
+          ball.previewY = y;
+        }
+      },
+      mouseup() {
+        if (!dragging) return;
+        dragging = false;
+        const dx = ball.x - (ball.previewX ?? ball.x);
+        const dy = ball.y - (ball.previewY ?? ball.y);
+        ball.vx = dx * 2.2;
+        ball.vy = dy * 2.2;
+        ball.moving = true;
+        shots--;
+      },
+      update(dt) {
+        if (!ball.moving) return;
+        ball.vy += 500 * dt;
+        ball.x += ball.vx * dt;
+        ball.y += ball.vy * dt;
+        const rim = {x:710,y:190,w:70,h:8};
+        const scoreZone = {x:730,y:190,w:30,h:16};
+        if (helpers.circleRect(ball.x,ball.y,ball.r,rim) && ball.vy > 0) ball.vy *= -0.8;
+        if (helpers.circleRect(ball.x,ball.y,ball.r,scoreZone) && ball.vy > 0) {
+          score++;
+          resetBall();
+        }
+        if (ball.y > 580 || ball.x < -40 || ball.x > 940) resetBall();
+      },
+      draw() {
+        helpers.clear('#dfe8f7');
+        ctx.fillStyle='#b5651d'; ctx.fillRect(760,120,12,220);
+        ctx.fillStyle='black'; ctx.fillRect(690,130,95,10);
+        ctx.strokeStyle='orange'; ctx.lineWidth=5; ctx.strokeRect(715,185,60,6);
+        ctx.fillStyle='orange';
+        ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
+        if (dragging && ball.previewX != null) {
+          ctx.strokeStyle='black';
+          ctx.beginPath(); ctx.moveTo(ball.x,ball.y); ctx.lineTo(ball.previewX, ball.previewY); ctx.stroke();
+        }
+        helpers.drawText(`Score: ${score}`, 20, 30, 28, 'black');
+        helpers.drawText(`Shots: ${shots}`, 20, 60, 24, 'black');
+      }
+    };
+  }
+
+  function createTreasure() {
+    let grid, revealed, treasure, moves, found;
+    const size = 8, cell = 55, ox = 230, oy = 70;
+    return {
+      name:'Digging for Treasure',
+      instructions:'Click squares to dig. Find the hidden treasure.',
+      init() {
+        grid = Array.from({length:size}, ()=>Array(size).fill(0));
+        revealed = Array.from({length:size}, ()=>Array(size).fill(false));
+        treasure = {x:helpers.randi(0,size-1), y:helpers.randi(0,size-1)};
+        moves = 20;
+        found = false;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('New Map', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      click(x,y) {
+        if (found || moves <= 0) return;
+        const gx = Math.floor((x - ox) / cell);
+        const gy = Math.floor((y - oy) / cell);
+        if (gx < 0 || gy < 0 || gx >= size || gy >= size) return;
+        if (revealed[gy][gx]) return;
+        revealed[gy][gx] = true;
+        moves--;
+        if (gx === treasure.x && gy === treasure.y) found = true;
+        else grid[gy][gx] = Math.abs(gx - treasure.x) + Math.abs(gy - treasure.y);
+      },
+      draw() {
+        helpers.clear('#c2a46a');
+        for (let y=0;y<size;y++) for (let x=0;x<size;x++) {
+          ctx.fillStyle = revealed[y][x] ? '#9b7d4b' : '#7a5f35';
+          ctx.fillRect(ox+x*cell, oy+y*cell, cell-2, cell-2);
+          if (revealed[y][x]) {
+            if (x===treasure.x && y===treasure.y) {
+              helpers.drawText('💰', ox+x*cell+15, oy+y*cell+38, 28);
+            } else if (grid[y][x] > 0) {
+              helpers.drawText(String(grid[y][x]), ox+x*cell+22, oy+y*cell+35, 22, 'white');
+            }
+          }
+        }
+        helpers.drawText(`Moves Left: ${moves}`, 20, 32, 28);
+        if (found) helpers.centerMessage('Treasure Found!');
+        else if (moves <= 0) helpers.centerMessage('Out of Moves');
+      }
+    };
+  }
+
+  function createTrivia() {
+    let questions, index, score, done;
+    function pickQuestions() {
+      return [
+        {q:'What planet is known as the Red Planet?', a:['Mars','Venus','Earth','Jupiter'], c:0},
+        {q:'How many sides does a hexagon have?', a:['5','6','7','8'], c:1},
+        {q:'Which ocean is the largest?', a:['Atlantic','Indian','Pacific','Arctic'], c:2},
+        {q:'What gas do plants use?', a:['Oxygen','Carbon Dioxide','Nitrogen','Helium'], c:1},
+        {q:'Which animal is called king of the jungle?', a:['Tiger','Lion','Bear','Wolf'], c:1}
+      ];
+    }
+    function renderQ() {
+      gameUI.innerHTML = '';
+      if (done) {
+        const sec = helpers.section('Finished');
+        sec.appendChild(helpers.button('Play Again', ()=>initQuiz(), {kind:'good'}));
+        gameUI.appendChild(sec);
+        return;
+      }
+      const q = questions[index];
+      const sec = helpers.section('Choose');
+      q.a.forEach((ans,i)=>{
+        sec.appendChild(helpers.button(ans, ()=>{
+          if (i === q.c) score++;
+          index++;
+          if (index >= questions.length) done = true;
+          renderQ();
+        }, {kind:'secondary'}));
+      });
+      gameUI.appendChild(sec);
+    }
+    function initQuiz() {
+      questions = pickQuestions();
+      index = 0; score = 0; done = false;
+      renderQ();
+    }
+    return {
+      name:'Trivia Quiz Game',
+      instructions:'Answer the questions and see your score.',
+      init() { initQuiz(); },
+      draw() {
+        helpers.clear('#1d2430');
+        if (!done) {
+          const q = questions[index];
+          helpers.drawText(`Question ${index+1}/${questions.length}`, 40, 60, 28);
+          helpers.drawText(q.q, 80, 170, 34, 'white');
+        } else {
+          helpers.centerMessage(`Score: ${score} / ${questions.length}`, 'Nice job!');
+        }
+      }
+    };
+  }
+
+  function createCity() {
+    let money, houses, roads, parks, selected;
+    return {
+      name:'Build-a-City',
+      instructions:'Choose a building type, then click the map to place it.',
+      init() {
+        money = 100;
+        houses = []; roads = []; parks = [];
+        selected = 'house';
+        const sec = helpers.section('Build');
+        sec.appendChild(helpers.button('House (10)', ()=>selected='house', {kind:'secondary'}));
+        sec.appendChild(helpers.button('Road (5)', ()=>selected='road', {kind:'secondary'}));
+        sec.appendChild(helpers.button('Park (8)', ()=>selected='park', {kind:'secondary'}));
+        sec.appendChild(helpers.button('New City', ()=>this.init(), {kind:'good'}));
+        gameUI.appendChild(sec);
+      },
+      click(x,y) {
+        const gx = Math.floor((x - 100) / 50);
+        const gy = Math.floor((y - 70) / 50);
+        if (gx < 0 || gy < 0 || gx >= 14 || gy >= 9) return;
+        const pos = {gx,gy};
+        const key = `${gx},${gy}`;
+        const used = [...houses,...roads,...parks].some(p=>`${p.gx},${p.gy}`===key);
+        if (used) return;
+        if (selected==='house' && money>=10) { money-=10; houses.push(pos); }
+        if (selected==='road' && money>=5) { money-=5; roads.push(pos); }
+        if (selected==='park' && money>=8) { money-=8; parks.push(pos); }
+      },
+      update(dt) {
+        money += dt * (houses.length * 0.8 + parks.length * 0.3);
+      },
+      draw() {
+        helpers.clear('#8fd18f');
+        for (let x=0;x<14;x++) for (let y=0;y<9;y++) {
+          ctx.strokeStyle = '#6caf6c';
+          ctx.strokeRect(100+x*50,70+y*50,50,50);
+        }
+        roads.forEach(r=>{ctx.fillStyle='#777';ctx.fillRect(100+r.gx*50+4,70+r.gy*50+18,42,14);});
+        parks.forEach(p=>{ctx.fillStyle='#2f9f48';ctx.fillRect(100+p.gx*50+8,70+p.gy*50+8,34,34);});
+        houses.forEach(h=>{ctx.fillStyle='#d96b4a';ctx.fillRect(100+h.gx*50+10,70+h.gy*50+18,30,22);ctx.fillStyle='#7b3f00';ctx.fillRect(100+h.gx*50+8,70+h.gy*50+10,34,10);});
+        helpers.drawText(`Money: ${Math.floor(money)}`, 20, 32, 28, 'black');
+        helpers.drawText(`Selected: ${selected}`, 20, 62, 22, 'black');
+      }
+    };
+  }
+  function createUFO() {
+    let ship, items, score, misses, spawn;
+    return {
+      name:'UFO Catcher Game',
+      instructions:'Move the UFO basket and catch the falling stars.',
+      init() {
+        ship = {x:390,y:500,w:120,h:26};
+        items = [];
+        score = 0;
+        misses = 0;
+        spawn = 0;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      mousemove(x) { ship.x = helpers.clamp(x - ship.w/2, 0, canvas.width - ship.w); },
+      update(dt) {
+        if (keys['arrowleft'] || keys['a']) ship.x -= 420 * dt;
+        if (keys['arrowright'] || keys['d']) ship.x += 420 * dt;
+        ship.x = helpers.clamp(ship.x, 0, canvas.width - ship.w);
+
+        spawn += dt;
+        if (spawn > 0.7) {
+          spawn = 0;
+          items.push({x:helpers.rand(20,880), y:-20, r:14, vy:helpers.rand(130,240)});
+        }
+
+        for (let i = items.length - 1; i >= 0; i--) {
+          const it = items[i];
+          it.y += it.vy * dt;
+          if (helpers.circleRect(it.x,it.y,it.r,ship)) {
+            score++;
+            items.splice(i,1);
+          } else if (it.y > 590) {
+            misses++;
+            items.splice(i,1);
+          }
+        }
+      },
+      draw() {
+        helpers.clear('#0b1024');
+        ctx.fillStyle = '#ffffff';
+        for (let i=0;i<70;i++) ctx.fillRect((i*137)%900, (i*59)%560, 2, 2);
+        ctx.fillStyle = '#9fe8ff';
+        ctx.fillRect(ship.x, ship.y, ship.w, ship.h);
+        ctx.fillStyle = '#7ad7ff';
+        ctx.fillRect(ship.x+25, ship.y-16, ship.w-50, 16);
+        ctx.fillStyle = 'gold';
+        items.forEach(it=>{
+          ctx.beginPath();
+          ctx.arc(it.x,it.y,it.r,0,Math.PI*2);
+          ctx.fill();
+        });
+        helpers.drawText(`Score: ${score}`,20,32,28);
+        helpers.drawText(`Misses: ${misses}`,20,62,22);
+      }
+    };
+  }
+
+  function createSpellBattle() {
+    let player, enemies, bolts, ebolts, score, cooldown, spawn, over;
+    return {
+      name:'Magic Spell Battle',
+      instructions:'Move with arrows. Space casts spells upward.',
+      init() {
+        player = {x:430,y:500,w:36,h:48,hp:5};
+        enemies = [];
+        bolts = [];
+        ebolts = [];
+        score = 0;
+        cooldown = 0;
+        spawn = 0;
+        over = false;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      keydown(e) {
+        if (e.key === ' ' && !over && cooldown <= 0) {
+          bolts.push({x:player.x+player.w/2-4,y:player.y,w:8,h:18,vy:-420});
+          cooldown = 0.28;
+        }
+        if (e.key.toLowerCase() === 'r' && over) this.init();
+      },
+      update(dt) {
+        if (over) return;
+        cooldown -= dt;
+        if (keys['arrowleft'] || keys['a']) player.x -= 320*dt;
+        if (keys['arrowright'] || keys['d']) player.x += 320*dt;
+        if (keys['arrowup'] || keys['w']) player.y -= 320*dt;
+        if (keys['arrowdown'] || keys['s']) player.y += 320*dt;
+        player.x = helpers.clamp(player.x, 0, 900-player.w);
+        player.y = helpers.clamp(player.y, 40, 560-player.h);
+
+        spawn += dt;
+        if (spawn > 1.0) {
+          spawn = 0;
+          enemies.push({x:helpers.rand(40,840),y:-30,w:34,h:34,hp:2,vy:helpers.rand(40,90),fire:helpers.rand(0.5,1.5)});
+        }
+
+        bolts.forEach(b=>b.y += b.vy*dt);
+        ebolts.forEach(b=>b.y += b.vy*dt);
+        enemies.forEach(en=>{
+          en.y += en.vy*dt;
+          en.fire -= dt;
+          if (en.fire <= 0) {
+            en.fire = helpers.rand(1.0,2.0);
+            ebolts.push({x:en.x+en.w/2-4,y:en.y+en.h,w:8,h:16,vy:220});
+          }
+        });
+
+        bolts = bolts.filter(b=>b.y>-30);
+        ebolts = ebolts.filter(b=>b.y<600);
+        enemies = enemies.filter(en=>en.y<620 && en.hp>0);
+
+        for (const b of bolts) {
+          for (const en of enemies) {
+            if (helpers.rects(b,en) && en.hp > 0) {
+              en.hp--;
+              b.y = -100;
+              if (en.hp <= 0) score += 25;
+            }
+          }
+        }
+
+        for (const b of ebolts) {
+          if (helpers.rects(b,player)) {
+            b.y = 700;
+            player.hp--;
+            if (player.hp <= 0) over = true;
+          }
+        }
+
+        for (const en of enemies) {
+          if (helpers.rects(en,player)) {
+            en.hp = 0;
+            player.hp--;
+            if (player.hp <= 0) over = true;
+          }
+        }
+      },
+      draw() {
+        helpers.clear('#1a1030');
+        ctx.fillStyle = '#6f5cff';
+        ctx.fillRect(player.x,player.y,player.w,player.h);
+        ctx.fillStyle = '#c79fff';
+        ctx.fillRect(player.x+8,player.y-10,20,10);
+        ctx.fillStyle = '#7bf0ff';
+        bolts.forEach(b=>ctx.fillRect(b.x,b.y,b.w,b.h));
+        ctx.fillStyle = '#ff7ad1';
+        ebolts.forEach(b=>ctx.fillRect(b.x,b.y,b.w,b.h));
+        ctx.fillStyle = '#9f2cff';
+        enemies.forEach(en=>ctx.fillRect(en.x,en.y,en.w,en.h));
+        helpers.drawText(`Score: ${score}`,20,32,28);
+        helpers.drawText(`HP: ${player.hp}`,20,62,22);
+        if (over) helpers.centerMessage('Defeated', 'Press R to restart');
+      }
+    };
+  }
+
+  function createMonster() {
+    let player, monster, shots, score, over, cooldown;
+    return {
+      name:'Giant Monster Destroyer',
+      instructions:'Move left/right and shoot the giant monster.',
+      init() {
+        player = {x:430,y:500,w:42,h:28,hp:5};
+        monster = {x:320,y:90,w:260,h:120,hp:50,vx:110};
+        shots = [];
+        score = 0;
+        over = false;
+        cooldown = 0;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      keydown(e) {
+        if (e.key === ' ' && !over && cooldown <= 0) {
+          shots.push({x:player.x+player.w/2-4,y:player.y,w:8,h:18,vy:-500});
+          cooldown = 0.18;
+        }
+      },
+      update(dt) {
+        if (over) return;
+        cooldown -= dt;
+        if (keys['arrowleft'] || keys['a']) player.x -= 360*dt;
+        if (keys['arrowright'] || keys['d']) player.x += 360*dt;
+        player.x = helpers.clamp(player.x,0,900-player.w);
+
+        monster.x += monster.vx * dt;
+        if (monster.x < 20 || monster.x + monster.w > 880) monster.vx *= -1;
+
+        shots.forEach(s=>s.y += s.vy*dt);
+        shots = shots.filter(s=>s.y > -20);
+
+        for (const s of shots) {
+          if (helpers.rects(s,monster)) {
+            s.y = -100;
+            monster.hp--;
+            score += 5;
+          }
+        }
+
+        if (monster.hp <= 0) {
+          over = true;
+        }
+      },
+      draw() {
+        helpers.clear('#261313');
+        ctx.fillStyle='#49a0ff';
+        ctx.fillRect(player.x,player.y,player.w,player.h);
+        ctx.fillStyle='#ff4d4d';
+        ctx.fillRect(monster.x,monster.y,monster.w,monster.h);
+        ctx.fillStyle='#ff9292';
+        ctx.fillRect(monster.x+40,monster.y+20,40,40);
+        ctx.fillRect(monster.x+180,monster.y+20,40,40);
+        ctx.fillStyle='yellow';
+        shots.forEach(s=>ctx.fillRect(s.x,s.y,s.w,s.h));
+        helpers.drawText(`Score: ${score}`,20,32,28);
+        helpers.drawText(`Monster HP: ${monster.hp}`,20,62,22);
+        if (monster.hp <= 0) helpers.centerMessage('Monster Defeated!');
+      }
+    };
+  }
+
+  function createIsland() {
+    let player, wood, food, day;
+    return {
+      name:'Island Survival',
+      instructions:'Walk around and collect wood and food.',
+      init() {
+        player = {x:450,y:280,w:24,h:24};
+        wood = Array.from({length:10},()=>({x:helpers.rand(40,860),y:helpers.rand(50,520),r:12,alive:true}));
+        food = Array.from({length:8},()=>({x:helpers.rand(40,860),y:helpers.rand(50,520),r:10,alive:true}));
+        day = 1;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        const sp = 220;
+        if (keys['arrowleft'] || keys['a']) player.x -= sp*dt;
+        if (keys['arrowright'] || keys['d']) player.x += sp*dt;
+        if (keys['arrowup'] || keys['w']) player.y -= sp*dt;
+        if (keys['arrowdown'] || keys['s']) player.y += sp*dt;
+        player.x = helpers.clamp(player.x,0,900-player.w);
+        player.y = helpers.clamp(player.y,0,560-player.h);
+
+        wood.forEach(w=>{ if (w.alive && helpers.dist(player.x+12,player.y+12,w.x,w.y) < 22) w.alive=false; });
+        food.forEach(f=>{ if (f.alive && helpers.dist(player.x+12,player.y+12,f.x,f.y) < 20) f.alive=false; });
+
+        const collected = wood.filter(w=>!w.alive).length + food.filter(f=>!f.alive).length;
+        day = 1 + Math.floor(collected / 4);
+      },
+      draw() {
+        helpers.clear('#4ab5e2');
+        ctx.fillStyle='#e2cf7a';
+        ctx.beginPath();
+        ctx.arc(450,280,220,0,Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle='#2f9f48';
+        ctx.beginPath();
+        ctx.arc(450,280,180,0,Math.PI*2);
+        ctx.fill();
+
+        wood.forEach(w=>{
+          if (!w.alive) return;
+          ctx.fillStyle='#7b4a1f';
+          ctx.fillRect(w.x-8,w.y-8,16,16);
+        });
+        food.forEach(f=>{
+          if (!f.alive) return;
+          ctx.fillStyle='red';
+          ctx.beginPath(); ctx.arc(f.x,f.y,10,0,Math.PI*2); ctx.fill();
+        });
+
+        ctx.fillStyle='white';
+        ctx.fillRect(player.x,player.y,player.w,player.h);
+        helpers.drawText(`Wood: ${wood.filter(w=>!w.alive).length}`,20,32,28);
+        helpers.drawText(`Food: ${food.filter(f=>!f.alive).length}`,20,62,22);
+        helpers.drawText(`Day: ${day}`,20,90,22);
+      }
+    };
+  }
+
+  function createColony() {
+    let ore, energy, domes, miners, solar;
+    return {
+      name:'Planet Colony Builder',
+      instructions:'Buy colony parts and grow your planet base.',
+      init() {
+        ore = 20;
+        energy = 10;
+        domes = 1;
+        miners = 0;
+        solar = 1;
+        const sec = helpers.section('Build');
+        sec.appendChild(helpers.button('Miner (10 ore)', ()=>{
+          if (ore >= 10) { ore -= 10; miners++; }
+        }, {kind:'secondary'}));
+        sec.appendChild(helpers.button('Solar (8 ore)', ()=>{
+          if (ore >= 8) { ore -= 8; solar++; }
+        }, {kind:'secondary'}));
+        sec.appendChild(helpers.button('Dome (15 ore)', ()=>{
+          if (ore >= 15) { ore -= 15; domes++; }
+        }, {kind:'good'}));
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        ore += miners * dt * 1.8;
+        energy += solar * dt * 1.2;
+      },
+      draw() {
+        helpers.clear('#120f24');
+        ctx.fillStyle='#d94';
+        ctx.beginPath(); ctx.arc(450,380,240,0,Math.PI*2); ctx.fill();
+        for (let i=0;i<domes;i++) {
+          const x = 260 + i*90;
+          ctx.fillStyle='rgba(140,220,255,0.8)';
+          ctx.beginPath(); ctx.arc(x,280,34,Math.PI,0); ctx.fill();
+          ctx.fillStyle='#999';
+          ctx.fillRect(x-34,280,68,18);
+        }
+        helpers.drawText(`Ore: ${Math.floor(ore)}`,20,32,28);
+        helpers.drawText(`Energy: ${Math.floor(energy)}`,20,62,22);
+        helpers.drawText(`Domes: ${domes}  Miners: ${miners}  Solar: ${solar}`,20,92,22);
+      }
+    };
+  }
+
+  function createMeteorDodger() {
+    let ship, meteors, score, over, spawn;
+    return {
+      name:'Meteor Dodger',
+      instructions:'Move left and right to dodge the meteors.',
+      init() {
+        ship = {x:430,y:500,w:40,h:40};
+        meteors = [];
+        score = 0;
+        over = false;
+        spawn = 0;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        if (over) return;
+        if (keys['arrowleft'] || keys['a']) ship.x -= 360*dt;
+        if (keys['arrowright'] || keys['d']) ship.x += 360*dt;
+        ship.x = helpers.clamp(ship.x,0,900-ship.w);
+
+        spawn += dt;
+        if (spawn > 0.35) {
+          spawn = 0;
+          meteors.push({x:helpers.rand(10,870),y:-30,r:helpers.rand(14,28),vy:helpers.rand(180,340)});
+        }
+
+        for (let i=meteors.length-1;i>=0;i--) {
+          const m = meteors[i];
+          m.y += m.vy*dt;
+          if (helpers.circleRect(m.x,m.y,m.r,ship)) over = true;
+          else if (m.y > 590) { meteors.splice(i,1); score++; }
+        }
+      },
+      draw() {
+        helpers.clear('black');
+        ctx.fillStyle='white';
+        for (let i=0;i<80;i++) ctx.fillRect((i*91)%900,(i*47)%560,2,2);
+        ctx.fillStyle='#4da6ff';
+        ctx.fillRect(ship.x,ship.y,ship.w,ship.h);
+        ctx.fillStyle='#777';
+        meteors.forEach(m=>{ ctx.beginPath(); ctx.arc(m.x,m.y,m.r,0,Math.PI*2); ctx.fill(); });
+        helpers.drawText(`Score: ${score}`,20,32,28);
+        if (over) helpers.centerMessage('Hit by Meteor');
+      }
+    };
+  }
+  function createRocketLanding() {
+    let rocket, over, won;
+    return {
+      name:'Rocket Landing Game',
+      instructions:'Use Left/Right to steer and Up to thrust. Land softly on the pad.',
+      init() {
+        rocket = {x:450,y:80,w:24,h:50,vx:0,vy:0,angle:0,fuel:100};
+        over = false;
+        won = false;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        if (over || won) return;
+        if (keys['arrowleft'] || keys['a']) rocket.vx -= 90*dt;
+        if (keys['arrowright'] || keys['d']) rocket.vx += 90*dt;
+        if ((keys['arrowup'] || keys['w']) && rocket.fuel > 0) {
+          rocket.vy -= 180*dt;
+          rocket.fuel -= 22*dt;
+        }
+        rocket.vy += 120*dt;
+        rocket.x += rocket.vx*dt;
+        rocket.y += rocket.vy*dt;
+        rocket.x = helpers.clamp(rocket.x, 0, 900-rocket.w);
+
+        const pad = {x:380,y:520,w:140,h:12};
+        if (rocket.y + rocket.h >= pad.y &&
+            rocket.x + rocket.w > pad.x &&
+            rocket.x < pad.x + pad.w) {
+          if (Math.abs(rocket.vy) < 85 && Math.abs(rocket.vx) < 55) won = true;
+          else over = true;
+        } else if (rocket.y + rocket.h > 560) {
+          over = true;
+        }
+      },
+      draw() {
+        helpers.clear('#0a1630');
+        ctx.fillStyle='#777';
+        ctx.fillRect(0,532,900,28);
+        ctx.fillStyle='#f5d76e';
+        ctx.fillRect(380,520,140,12);
+        ctx.fillStyle='white';
+        ctx.fillRect(rocket.x,rocket.y,rocket.w,rocket.h);
+        ctx.fillStyle='red';
+        ctx.fillRect(rocket.x+6,rocket.y-10,12,10);
+        if ((keys['arrowup'] || keys['w']) && !over && !won && rocket.fuel > 0) {
+          ctx.fillStyle='orange';
+          ctx.beginPath();
+          ctx.moveTo(rocket.x+6, rocket.y+rocket.h);
+          ctx.lineTo(rocket.x+18, rocket.y+rocket.h);
+          ctx.lineTo(rocket.x+12, rocket.y+rocket.h+20);
+          ctx.fill();
+        }
+        helpers.drawText(`Fuel: ${Math.max(0, Math.floor(rocket.fuel))}`,20,32,28);
+        helpers.drawText(`VX: ${rocket.vx.toFixed(1)}  VY: ${rocket.vy.toFixed(1)}`,20,62,22);
+        if (won) helpers.centerMessage('Perfect Landing!');
+        if (over) helpers.centerMessage('Crash Landing');
+      }
+    };
+  }
+
+  function createJetpack() {
+    let player, walls, score, spawn, over;
+    return {
+      name:'Jetpack Cave Escape',
+      instructions:'Hold space or click to rise. Avoid the cave walls.',
+      init() {
+        player = {x:170,y:260,r:16,vy:0};
+        walls = [];
+        score = 0;
+        spawn = 0;
+        over = false;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      keydown(e) { if ((e.key === ' ' || e.key === 'ArrowUp') && !over) player.vy = -180; },
+      click() { if (!over) player.vy = -180; },
+      update(dt) {
+        if (over) return;
+        player.vy += 330*dt;
+        player.y += player.vy*dt;
+
+        spawn += dt;
+        if (spawn > 0.55) {
+          spawn = 0;
+          const gapY = helpers.rand(150,410);
+          const gapH = 150;
+          walls.push({x:900,w:70,gapY,gapH});
+        }
+
+        walls.forEach(w=>w.x -= 240*dt);
+        walls = walls.filter(w=>w.x + w.w > -10);
+
+        if (player.y - player.r < 0 || player.y + player.r > 560) over = true;
+
+        for (const w of walls) {
+          const topRect = {x:w.x,y:0,w:w.w,h:w.gapY-w.gapH/2};
+          const botRect = {x:w.x,y:w.gapY+w.gapH/2,w:w.w,h:560-(w.gapY+w.gapH/2)};
+          if (helpers.circleRect(player.x,player.y,player.r,topRect) || helpers.circleRect(player.x,player.y,player.r,botRect)) {
+            over = true;
+          }
+          if (!w.passed && w.x + w.w < player.x) {
+            w.passed = true;
+            score++;
+          }
+        }
+      },
+      draw() {
+        helpers.clear('#101820');
+        ctx.fillStyle='#4b8b3b';
+        walls.forEach(w=>{
+          ctx.fillRect(w.x,0,w.w,w.gapY-w.gapH/2);
+          ctx.fillRect(w.x,w.gapY+w.gapH/2,w.w,560-(w.gapY+w.gapH/2));
+        });
+        ctx.fillStyle='#ffd54a';
+        ctx.beginPath(); ctx.arc(player.x,player.y,player.r,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='orange';
+        ctx.fillRect(player.x-6,player.y+12,4,12);
+        ctx.fillRect(player.x+2,player.y+12,4,12);
+        helpers.drawText(`Score: ${score}`,20,32,28);
+        if (over) helpers.centerMessage('Cave Crash');
+      }
+    };
+  }
+
+  function createGhostHunter() {
+    let player, ghosts, shots, score, spawn, cooldown, over;
+    return {
+      name:'Ghost Hunter Game',
+      instructions:'Move with arrows. Space shoots ghost traps.',
+      init() {
+        player = {x:430,y:500,w:32,h:42,hp:3};
+        ghosts = [];
+        shots = [];
+        score = 0;
+        spawn = 0;
+        cooldown = 0;
+        over = false;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      keydown(e) {
+        if (e.key === ' ' && cooldown <= 0 && !over) {
+          shots.push({x:player.x+player.w/2-4,y:player.y,w:8,h:18,vy:-420});
+          cooldown = 0.22;
+        }
+      },
+      update(dt) {
+        if (over) return;
+        cooldown -= dt;
+        if (keys['arrowleft'] || keys['a']) player.x -= 300*dt;
+        if (keys['arrowright'] || keys['d']) player.x += 300*dt;
+        if (keys['arrowup'] || keys['w']) player.y -= 300*dt;
+        if (keys['arrowdown'] || keys['s']) player.y += 300*dt;
+        player.x = helpers.clamp(player.x,0,900-player.w);
+        player.y = helpers.clamp(player.y,60,560-player.h);
+
+        spawn += dt;
+        if (spawn > 0.8) {
+          spawn = 0;
+          ghosts.push({x:helpers.rand(20,860),y:-20,r:18,vy:helpers.rand(70,130),vx:helpers.rand(-80,80)});
+        }
+
+        shots.forEach(s=>s.y += s.vy*dt);
+        shots = shots.filter(s=>s.y > -30);
+
+        ghosts.forEach(g=>{
+          g.y += g.vy*dt;
+          g.x += g.vx*dt;
+          if (g.x < 10 || g.x > 890) g.vx *= -1;
+        });
+        ghosts = ghosts.filter(g=>g.y < 620);
+
+        for (const s of shots) {
+          for (const g of ghosts) {
+            if (helpers.dist(s.x+4,s.y+9,g.x,g.y) < g.r+8) {
+              g.y = 700;
+              s.y = -100;
+              score += 10;
+            }
+          }
+        }
+
+        ghosts = ghosts.filter(g=>g.y < 620);
+
+        for (const g of ghosts) {
+          if (helpers.circleRect(g.x,g.y,g.r,player)) {
+            g.y = 700;
+            player.hp--;
+            if (player.hp <= 0) over = true;
+          }
+        }
+        ghosts = ghosts.filter(g=>g.y < 620);
+      },
+      draw() {
+        helpers.clear('#0f0f1d');
+        ctx.fillStyle='#d9d9ff';
+        ghosts.forEach(g=>{
+          ctx.beginPath(); ctx.arc(g.x,g.y,g.r,Math.PI,0); ctx.fill();
+          ctx.fillRect(g.x-g.r,g.y,g.r*2,g.r);
+        });
+        ctx.fillStyle='#6be3ff';
+        ctx.fillRect(player.x,player.y,player.w,player.h);
+        ctx.fillStyle='yellow';
+        shots.forEach(s=>ctx.fillRect(s.x,s.y,s.w,s.h));
+        helpers.drawText(`Score: ${score}`,20,32,28);
+        helpers.drawText(`HP: ${player.hp}`,20,62,22);
+        if (over) helpers.centerMessage('Ghosts Win');
+      }
+    };
+  }
+
+  function createRobotBuilder() {
+    let parts, built;
+    return {
+      name:'Giant Robot Builder',
+      instructions:'Click the parts in the right panel to build your robot.',
+      init() {
+        parts = {head:false,body:false,leftArm:false,rightArm:false,leftLeg:false,rightLeg:false};
+        built = 0;
+        const sec = helpers.section('Parts');
+        Object.keys(parts).forEach(name=>{
+          sec.appendChild(helpers.button(name, ()=>{
+            if (!parts[name]) { parts[name] = true; built++; }
+          }, {kind:'secondary'}));
+        });
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'good'}));
+        gameUI.appendChild(sec);
+      },
+      draw() {
+        helpers.clear('#182030');
+        helpers.drawText(`Built Parts: ${built}/6`,20,32,28);
+        ctx.strokeStyle='white';
+        ctx.lineWidth=4;
+        const cx = 430, cy = 170;
+        if (parts.head) ctx.strokeRect(cx,cy,80,70);
+        if (parts.body) ctx.strokeRect(cx-10,cy+80,100,120);
+        if (parts.leftArm) ctx.strokeRect(cx-70,cy+85,50,20);
+        if (parts.rightArm) ctx.strokeRect(cx+100,cy+85,50,20);
+        if (parts.leftLeg) ctx.strokeRect(cx+5,cy+205,20,90);
+        if (parts.rightLeg) ctx.strokeRect(cx+55,cy+205,20,90);
+        if (built === 6) helpers.centerMessage('Robot Complete!');
+      }
+    };
+  }
+
+  function createSlime() {
+    let slime, food, level;
+    function newFood() {
+      return {x:helpers.rand(30,870), y:helpers.rand(40,530), r:10};
+    }
+    return {
+      name:'Slime Evolution Game',
+      instructions:'Move around and eat food to evolve.',
+      init() {
+        slime = {x:450,y:280,r:18};
+        food = Array.from({length:12}, ()=>newFood());
+        level = 1;
+      },
+      update(dt) {
+        const sp = 170;
+        if (keys['arrowleft'] || keys['a']) slime.x -= sp*dt;
+        if (keys['arrowright'] || keys['d']) slime.x += sp*dt;
+        if (keys['arrowup'] || keys['w']) slime.y -= sp*dt;
+        if (keys['arrowdown'] || keys['s']) slime.y += sp*dt;
+        slime.x = helpers.clamp(slime.x, slime.r, 900-slime.r);
+        slime.y = helpers.clamp(slime.y, slime.r, 560-slime.r);
+
+        for (const f of food) {
+          if (f.alive !== false && helpers.dist(slime.x,slime.y,f.x,f.y) < slime.r + f.r) {
+            f.alive = false;
+            slime.r += 1.5;
+          }
+        }
+
+        if (food.every(f=>f.alive === false)) {
+          food = Array.from({length:12}, ()=>newFood());
+          level++;
+        }
+      },
+      draw() {
+        helpers.clear('#14331f');
+        ctx.fillStyle='gold';
+        food.forEach(f=>{
+          if (f.alive === false) return;
+          ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,Math.PI*2); ctx.fill();
+        });
+        ctx.fillStyle='#6bff8f';
+        ctx.beginPath(); ctx.arc(slime.x,slime.y,slime.r,0,Math.PI*2); ctx.fill();
+        helpers.drawText(`Level: ${level}`,20,32,28);
+        helpers.drawText(`Size: ${slime.r.toFixed(0)}`,20,62,22);
+      }
+    };
+  }
+
+  function createVolcanoBuilder() {
+    let lava, huts, bridges;
+    return {
+      name:'Volcano Island Builder',
+      instructions:'Place huts and bridges before the lava rises too high.',
+      init() {
+        lava = 0;
+        huts = [];
+        bridges = [];
+        const sec = helpers.section('Build');
+        sec.appendChild(helpers.button('Add Hut', ()=>{
+          huts.push({x:helpers.rand(120,780), y:helpers.rand(330,500)});
+        }, {kind:'secondary'}));
+        sec.appendChild(helpers.button('Add Bridge', ()=>{
+          bridges.push({x:helpers.rand(150,720), y:helpers.rand(250,420), w:helpers.rand(90,160)});
+        }, {kind:'good'}));
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        lava += dt * 10;
+      },
+      draw() {
+        helpers.clear('#302010');
+        ctx.fillStyle='#3f7a3f';
+        ctx.beginPath(); ctx.arc(450,360,240,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#5a3a20';
+        ctx.beginPath(); ctx.moveTo(360,330); ctx.lineTo(450,120); ctx.lineTo(540,330); ctx.closePath(); ctx.fill();
+        ctx.fillStyle='orange';
+        ctx.fillRect(405, 120 + lava, 90, 210 - lava);
+        bridges.forEach(b=>{
+          ctx.fillStyle='#7a4a22';
+          ctx.fillRect(b.x,b.y,b.w,12);
+        });
+        huts.forEach(h=>{
+          ctx.fillStyle='#c97c4a';
+          ctx.fillRect(h.x,h.y,34,24);
+          ctx.fillStyle='#7b3f00';
+          ctx.fillRect(h.x-2,h.y-10,38,12);
+        });
+        helpers.drawText(`Lava Height: ${Math.floor(lava)}`,20,32,28);
+      }
+    };
+  }
+
+  function createDinoPark() {
+    let money, dinos, visitors;
+    return {
+      name:'Dinosaur Park Game',
+      instructions:'Buy dinosaurs to attract visitors and earn money.',
+      init() {
+        money = 50;
+        dinos = 0;
+        visitors = 0;
+        const sec = helpers.section('Park');
+        sec.appendChild(helpers.button('Buy Dino (25)', ()=>{
+          if (money >= 25) { money -= 25; dinos++; }
+        }, {kind:'good'}));
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        visitors += dinos * dt * 0.6;
+        money += dinos * dt * 1.1;
+      },
+      draw() {
+        helpers.clear('#a7d97a');
+        for (let i=0;i<dinos;i++) {
+          const x = 170 + (i%6)*100;
+          const y = 180 + Math.floor(i/6)*90;
+          ctx.fillStyle='green';
+          ctx.fillRect(x,y,50,30);
+          ctx.fillRect(x+35,y-20,14,24);
+          ctx.fillRect(x+42,y-30,16,14);
+        }
+        helpers.drawText(`Money: ${Math.floor(money)}`,20,32,28,'black');
+        helpers.drawText(`Dinosaurs: ${dinos}`,20,62,22,'black');
+        helpers.drawText(`Visitors: ${Math.floor(visitors)}`,20,90,22,'black');
+      }
+    };
+  }
+  function createMarsRover() {
+    let rover, rocks, samples, collected, timeLeft, over, won;
+    return {
+      name:'Mars Rover Mission',
+      instructions:'Drive around Mars and collect all the samples before time runs out.',
+      init() {
+        rover = {x:80,y:500,w:44,h:26};
+        rocks = Array.from({length:18}, ()=>({
+          x:helpers.rand(80,860), y:helpers.rand(70,510), r:helpers.rand(10,18)
+        }));
+        samples = Array.from({length:8}, ()=>({
+          x:helpers.rand(90,850), y:helpers.rand(80,500), r:10, alive:true
+        }));
+        collected = 0;
+        timeLeft = 60;
+        over = false;
+        won = false;
+        const sec = helpers.section('Mission');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        if (over || won) return;
+        timeLeft -= dt;
+        if (timeLeft <= 0) { over = true; return; }
+
+        const oldX = rover.x;
+        const oldY = rover.y;
+        const sp = 180;
+        if (keys['arrowleft'] || keys['a']) rover.x -= sp*dt;
+        if (keys['arrowright'] || keys['d']) rover.x += sp*dt;
+        if (keys['arrowup'] || keys['w']) rover.y -= sp*dt;
+        if (keys['arrowdown'] || keys['s']) rover.y += sp*dt;
+        rover.x = helpers.clamp(rover.x, 0, 900-rover.w);
+        rover.y = helpers.clamp(rover.y, 0, 560-rover.h);
+
+        for (const r of rocks) {
+          if (helpers.circleRect(r.x,r.y,r.r,rover)) {
+            rover.x = oldX;
+            rover.y = oldY;
+            break;
+          }
+        }
+
+        for (const s of samples) {
+          if (s.alive && helpers.dist(rover.x+rover.w/2, rover.y+rover.h/2, s.x, s.y) < s.r + 18) {
+            s.alive = false;
+            collected++;
+          }
+        }
+
+        if (samples.every(s=>!s.alive)) won = true;
+      },
+      draw() {
+        helpers.clear('#8b4f2c');
+        ctx.fillStyle='#6a3a1a';
+        rocks.forEach(r=>{
+          ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,Math.PI*2); ctx.fill();
+        });
+        ctx.fillStyle='cyan';
+        samples.forEach(s=>{
+          if (!s.alive) return;
+          ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+        });
+        ctx.fillStyle='#ddd';
+        ctx.fillRect(rover.x,rover.y,rover.w,rover.h);
+        ctx.fillStyle='#999';
+        ctx.fillRect(rover.x+6,rover.y-10,24,10);
+        helpers.drawText(`Samples: ${collected}/8`,20,32,28);
+        helpers.drawText(`Time: ${Math.ceil(timeLeft)}`,20,62,22);
+        if (won) helpers.centerMessage('Mission Complete!');
+        if (over) helpers.centerMessage('Mission Failed');
+      }
+    };
+  }
+
+  function createBlackHole() {
+    let ship, stars, score, over;
+    const hole = {x:450,y:280,r:70};
+    return {
+      name:'Black Hole Escape',
+      instructions:'Stay away from the black hole and survive as long as you can.',
+      init() {
+        ship = {x:150,y:100,w:28,h:28,vx:0,vy:0};
+        stars = Array.from({length:100},()=>({x:helpers.rand(0,900),y:helpers.rand(0,560),s:helpers.rand(1,3)}));
+        score = 0;
+        over = false;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        if (over) return;
+        const ax = hole.x - (ship.x+ship.w/2);
+        const ay = hole.y - (ship.y+ship.h/2);
+        const d = Math.max(60, Math.hypot(ax,ay));
+        const force = 9000 / (d*d);
+        ship.vx += (ax/d) * force * dt * 200;
+        ship.vy += (ay/d) * force * dt * 200;
+
+        if (keys['arrowleft'] || keys['a']) ship.vx -= 180*dt;
+        if (keys['arrowright'] || keys['d']) ship.vx += 180*dt;
+        if (keys['arrowup'] || keys['w']) ship.vy -= 180*dt;
+        if (keys['arrowdown'] || keys['s']) ship.vy += 180*dt;
+
+        ship.x += ship.vx * dt;
+        ship.y += ship.vy * dt;
+        ship.vx *= 0.992;
+        ship.vy *= 0.992;
+
+        if (helpers.dist(ship.x+14,ship.y+14,hole.x,hole.y) < hole.r + 10) over = true;
+        if (ship.x < -50 || ship.x > 950 || ship.y < -50 || ship.y > 610) over = true;
+
+        if (!over) score += dt * 10;
+      },
+      draw() {
+        helpers.clear('black');
+        ctx.fillStyle='white';
+        stars.forEach(s=>ctx.fillRect(s.x,s.y,s.s,s.s));
+        const grad = ctx.createRadialGradient(hole.x,hole.y,10,hole.x,hole.y,120);
+        grad.addColorStop(0,'#000');
+        grad.addColorStop(0.5,'#320049');
+        grad.addColorStop(1,'rgba(128,0,255,0.1)');
+        ctx.fillStyle=grad;
+        ctx.beginPath(); ctx.arc(hole.x,hole.y,120,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#111';
+        ctx.beginPath(); ctx.arc(hole.x,hole.y,hole.r,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#4da6ff';
+        ctx.fillRect(ship.x,ship.y,ship.w,ship.h);
+        helpers.drawText(`Score: ${Math.floor(score)}`,20,32,28);
+        if (over) helpers.centerMessage('Pulled In');
+      }
+    };
+  }
+
+  function createPlaceholderArcade(name, instruction, color='#222') {
+    let score = 0, timer = 0;
+    return {
+      name,
+      instructions: instruction,
+      init() {
+        score = 0;
+        timer = 0;
+        const sec = helpers.section('Game');
+        sec.appendChild(helpers.button('Restart', ()=>this.init(), {kind:'secondary'}));
+        gameUI.appendChild(sec);
+      },
+      update(dt) {
+        timer += dt;
+        score = Math.floor(timer * 10);
+      },
+      draw() {
+        helpers.clear(color);
+        helpers.drawText(name, 450, 220, 44, 'white', 'center');
+        helpers.drawText('This is a simple arcade version built into the file.', 450, 270, 24, '#ddd', 'center');
+        helpers.drawText(`Score: ${score}`, 450, 320, 28, 'white', 'center');
+      }
+    };
+  }
+
+  const registry = [
+    ['snake', createSnake()],
+    ['flappy', createFlappy()],
+    ['shooter', createShooter()],
+    ['cookie', createCookie()],
+    ['doger', createDoger()],
+    ['frogger', createFrogger()],
+    ['breakout', createBreakout()],
+    ['pong', createPong()],
+    ['simon', createSimon()],
+    ['reaction', createReaction()],
+    ['angry', createAngry()],
+    ['basketball', createBasketball()],
+    ['treasure', createTreasure()],
+    ['trivia', createTrivia()],
+    ['city', createCity()],
+    ['ufo', createUFO()],
+    ['spell', createSpellBattle()],
+    ['monster', createMonster()],
+    ['island', createIsland()],
+    ['colony', createColony()],
+    ['meteor', createMeteorDodger()],
+    ['rocket', createRocketLanding()],
+    ['jetpack', createJetpack()],
+    ['ghost', createGhostHunter()],
+    ['robot', createRobotBuilder()],
+    ['slime', createSlime()],
+    ['volcano', createVolcanoBuilder()],
+    ['dino', createDinoPark()],
+    ['mars', createMarsRover()],
+    ['blackhole', createBlackHole()]
+  ];
+
+  const gameCards = [
+    { id:'snake', title:'Snake', tag:'Playable' },
+    { id:'flappy', title:'Flappy Bird', tag:'Playable' },
+    { id:'shooter', title:'Space Shooter', tag:'Playable' },
+    { id:'cookie', title:'Cookie Clicker', tag:'Playable' },
+    { id:'doger', title:'Block Dodger', tag:'Playable' },
+    { id:'frogger', title:'Frogger', tag:'Playable' },
+    { id:'breakout', title:'Breakout', tag:'Playable' },
+    { id:'pong', title:'Pong', tag:'Playable' },
+    { id:'simon', title:'Simon Memory Game', tag:'Playable' },
+    { id:'reaction', title:'Reaction Speed Test', tag:'Playable' },
+    { id:'angry', title:'Angry Birds Launcher', tag:'Playable' },
+    { id:'basketball', title:'Basketball Shot Game', tag:'Playable' },
+    { id:'treasure', title:'Digging for Treasure', tag:'Playable' },
+    { id:'trivia', title:'Trivia Quiz Game', tag:'Playable' },
+    { id:'city', title:'Build-a-City', tag:'Playable' },
+    { id:'ufo', title:'UFO Catcher Game', tag:'Playable' },
+    { id:'spell', title:'Magic Spell Battle', tag:'Playable' },
+    { id:'monster', title:'Giant Monster Destroyer', tag:'Playable' },
+    { id:'island', title:'Island Survival', tag:'Playable' },
+    { id:'colony', title:'Planet Colony Builder', tag:'Playable' },
+    { id:'meteor', title:'Meteor Dodger', tag:'Playable' },
+    { id:'rocket', title:'Rocket Landing Game', tag:'Playable' },
+    { id:'jetpack', title:'Jetpack Cave Escape', tag:'Playable' },
+    { id:'ghost', title:'Ghost Hunter Game', tag:'Playable' },
+    { id:'robot', title:'Giant Robot Builder', tag:'Playable' },
+    { id:'slime', title:'Slime Evolution Game', tag:'Playable' },
+    { id:'volcano', title:'Volcano Island Builder', tag:'Playable' },
+    { id:'dino', title:'Dinosaur Park Game', tag:'Playable' },
+    { id:'mars', title:'Mars Rover Mission', tag:'Playable' },
+    { id:'blackhole', title:'Black Hole Escape', tag:'Playable' }
+  ];
+
+  const map = new Map(registry);
+
+  gameCards.forEach(card => {
+    const el = document.createElement('button');
+    el.className = 'game-card';
+    el.innerHTML = `<h3>${card.title}</h3><span class="tag">${card.tag}</span>`;
+    el.onclick = () => setGame(card.id, map.get(card.id));
+    gamesList.appendChild(el);
+  });
+})();
+</script>
+</body>
+</html>
